@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>El Borrador — Proyección en vivo</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Arial,sans-serif}
+  .stage{position:relative;width:100%;height:100vh;overflow:hidden}
+  .img{position:absolute;inset:0;background-size:contain;background-position:center;background-repeat:no-repeat;opacity:0;transition:opacity 1.2s ease}
+  .img.visible{opacity:1}
+  .hud{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center}
+  .timer{margin-left:auto;font-size:28px;font-weight:700;letter-spacing:1px;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:8px}
+  .controls{display:flex;gap:8px}
+  button,select{background:#111;color:#fff;border:1px solid #444;padding:6px 10px;border-radius:8px;cursor:pointer}
+  button:hover{border-color:#888}
+  .prompt{position:absolute;bottom:12px;left:12px;right:12px;background:rgba(0,0,0,.45);padding:10px;border-radius:8px;font-size:14px;line-height:1.35}
+  .flash{animation:flash .6s ease 1}
+  @keyframes flash{from{background:#fff;color:#000}to{background:rgba(0,0,0,.45);color:#fff}}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="img" id="imgA"></div>
+  <div class="img" id="imgB"></div>
+
+  <div class="hud">
+    <div class="controls">
+      <button id="micBtn">🎙️ Start/Stop mic</button>
+      <button id="genNow">Generate now</button>
+      <select id="cadence">
+        <option value="30">Every 30s</option>
+        <option value="20">Every 20s</option>
+        <option value="40">Every 40s</option>
+      </select>
+      <button id="reset">Reset 5:00</button>
+      <button id="fullscreen">Fullscreen</button>
+    </div>
+    <div class="timer" id="timer">05:00</div>
+  </div>
+
+  <div class="prompt" id="promptBox">Prompt en vivo…</div>
+</div>
+
+<audio id="beep">
+  <source src="data:audio/wav;base64,UklGRhQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAAAAAACAgICAg" type="audio/wav">
+</audio>
+
+<script>
+const API_URL = 'https://el-borrador-ai-z87l-7d8uy1i6p-marias-projects-bbe47703.vercel.app/api/generate-image';
+
+
+// ---------- DOM ----------
+const imgA = document.getElementById('imgA');
+const imgB = document.getElementById('imgB');
+let showingA = true;
+const timerEl = document.getElementById('timer');
+const promptBox = document.getElementById('promptBox');
+const micBtn = document.getElementById('micBtn');
+const genNowBtn = document.getElementById('genNow');
+const cadenceSel = document.getElementById('cadence');
+const resetBtn = document.getElementById('reset');
+const fsBtn = document.getElementById('fullscreen');
+const beep = document.getElementById('beep');
+
+// ---------- Countdown (5:00) ----------
+let totalSeconds = 5 * 60;
+let countdownInt = null;
+function startCountdown(){
+  stopCountdown();
+  countdownInt = setInterval(()=>{
+    totalSeconds--;
+    const m = Math.max(0, Math.floor(totalSeconds/60)).toString().padStart(2,'0');
+    const s = Math.max(0, totalSeconds%60).toString().padStart(2,'0');
+    timerEl.textContent = `${m}:${s}`;
+    if (totalSeconds === 30) surpriseCue(); // sorpresa en 4:30 → quedan 30s
+    if (totalSeconds <= 0){ clearInterval(countdownInt); try{beep.play()}catch(e){} }
+  },1000);
+}
+function stopCountdown(){ if (countdownInt) clearInterval(countdownInt); }
+function resetCountdown(){ totalSeconds = 300; timerEl.textContent='05:00'; }
+
+// ---------- Speech-to-text ----------
+let recognizing = false;
+let recognition;
+let liveText = '';
+function initSTT(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = 'es-ES';
+  r.continuous = true;
+  r.interimResults = true;
+  r.onresult = (e)=>{
+    let finalChunk='';
+    for (let i=e.resultIndex;i<e.results.length;i++){
+      const tr = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalChunk += tr + ' ';
+      else liveText = tr;
+    }
+    if (finalChunk) liveText = finalChunk;
+    promptBox.textContent = liveText || 'Prompt en vivo…';
+    promptBox.classList.add('flash'); setTimeout(()=>promptBox.classList.remove('flash'),150);
+  };
+  r.onend = ()=>{ if (recognizing) r.start(); };
+  return r;
+}
+recognition = initSTT();
+
+micBtn.onclick = ()=>{
+  if (!recognition){ alert('SpeechRecognition no disponible en este navegador.'); return; }
+  if (!recognizing){ recognition.start(); recognizing = true; micBtn.textContent='🛑 Stop mic'; }
+  else { recognizing=false; recognition.stop(); micBtn.textContent='🎙️ Start mic'; }
+};
+
+// ---------- Image generation ----------
+async function generateImage(prompt){
+  const res = await fetch(API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ prompt })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Error generating image');
+  return data.url;
+}
+
+function crossfadeTo(url){
+  const next = showingA ? imgB : imgA;
+  const prev = showingA ? imgA : imgB;
+  next.style.backgroundImage = `url("${url}")`;
+  next.classList.add('visible');
+  prev.classList.remove('visible');
+  showingA = !showingA;
+}
+
+// ---------- Cadence loop ----------
+let cadenceInt = null;
+function startCadence(){
+  stopCadence();
+  const ms = Number(cadenceSel.value) * 1000;
+  cadenceInt = setInterval(async ()=>{
+    const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'imagen abstracta sobre atención, humano y algoritmo en escena';
+    const prompt = `Genera una imagen escénica, poética, sin texto, inspirada en: ${base}. Sin logos. Fondo oscuro, alto contraste.`;
+    try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ console.error(e); }
+  }, ms);
+}
+function stopCadence(){ if (cadenceInt) clearInterval(cadenceInt); }
+
+genNowBtn.onclick = async ()=>{
+  const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'imagen abstracta sobre atención, humano y algoritmo en escena';
+  const prompt = `Genera una imagen escénica, poética, sin texto, inspirada en: ${base}. Sin logos. Fondo oscuro, alto contraste.`;
+  try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ alert('Error generando imagen'); }
+};
+cadenceSel.onchange = ()=> startCadence();
+resetBtn.onclick = ()=>{ stopCadence(); resetCountdown(); startCountdown(); };
+fsBtn.onclick = ()=> document.documentElement.requestFullscreen?.();
+
+// ---------- Sorpresa en 4:30 ----------
+let surpriseDone = false;
+async function surpriseCue(){
+  if (surpriseDone) return;
+  surpriseDone = true;
+  const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'atención, humano, algoritmo';
+  const prompt = `SORPRESA FINAL (estilo invertido): blanco sobre negro, siluetas minimalistas, alto contraste, composición asimétrica, sin texto. Inspirado en: ${base}.`;
+  try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ console.error(e); }
+}
+
+// ---------- Start show ----------
+window.addEventListener('load', ()=>{
+  resetCountdown();
+  startCountdown();
+  startCadence();
+});
+</script>
+</body>
+</html>
