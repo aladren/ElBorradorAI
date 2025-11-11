@@ -28,7 +28,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         prompt: prompt,
-        aspect_ratio: '1:1',
+        cfg_scale: 7.5,
+        aspect_ratio: '16:9',
         output_format: 'png',
         model: 'stable-diffusion-xl-1024-v1-0'
       })
