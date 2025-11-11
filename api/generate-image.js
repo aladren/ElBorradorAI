@@ -1,44 +1,53 @@
 export default async function handler(req, res) {
-  // --- CORS (incluye preflight) ---
+  // --- CORS headers ---
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
 
+  // --- Handle preflight request ---
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // --- Only allow POST ---
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST, OPTIONS');
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
+  // --- Read prompt ---
+  let body = '';
+  await new Promise(resolve => {
+    req.on('data', chunk => (body += chunk));
+    req.on('end', resolve);
+  });
+
+  let prompt = '';
   try {
-    // --- Leer body de forma segura en Vercel (a veces req.body viene vacío) ---
-    let bodyText = '';
-    if (typeof req.body === 'string') {
-      bodyText = req.body;
-    } else if (typeof req.body === 'object' && req.body !== null) {
-      bodyText = JSON.stringify(req.body);
-    } else {
-      await new Promise((resolve) => {
-        let data = '';
-        req.on('data', (chunk) => (data += chunk));
-        req.on('end', () => {
-          bodyText = data || '';
-          resolve();
-        });
-      });
-    }
+    const parsed = JSON.parse(body || '{}');
+    prompt = parsed.prompt || '';
+  } catch {
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
 
-    let prompt = '';
-    try {
-      const parsed = bodyText ? JSON.parse(bodyText) : {};
-      prompt = typeof parsed.prompt === 'string' ? parsed.prompt : '';
-    } catch {
-      // si no parsea, prompt queda vacío
-    }
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
 
-    if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  // --- Fallback if OpenAI unavailable ---
+  const fallback = () => {
+    const seed = Date.now();
+    return res
+      .status(200)
+      .json({ url: `https://picsum.photos/seed/${seed}/1024` });
+  };
 
-    // --- Llamada a OpenAI Images ---
+  // --- Check for API key ---
+  if (!process.env.OPENAI_API_KEY || !process.env.OPENAI_API_KEY.startsWith('sk-')) {
+    console.error('Missing or invalid OpenAI API key');
+    return fallback();
+  }
+
+  try {
+    // --- Call OpenAI image API ---
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
@@ -54,14 +63,19 @@ export default async function handler(req, res) {
 
     const data = await r.json();
     if (!r.ok) {
-      // Devuelve el mensaje real para que lo veas en la consola
-      return res.status(r.status).json({ error: data.error?.message || 'OpenAI error' });
+      const msg = data?.error?.message || '';
+      console.error('OpenAI error:', msg);
+      // Fallback for verify/billing errors
+      if (/verify organization|quota|billing|hard limit/i.test(msg)) return fallback();
+      return res.status(r.status).json({ error: msg });
     }
 
     const url = data?.data?.[0]?.url;
+    if (!url) return fallback();
+
     return res.status(200).json({ url });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
+    console.error('Server error:', err);
+    return fallback();
   }
 }
