@@ -49,7 +49,6 @@
 <script>
 const API_URL = '/api/generate-image';
 
-
 // ---------- DOM ----------
 const imgA = document.getElementById('imgA');
 const imgB = document.getElementById('imgB');
@@ -66,6 +65,7 @@ const beep = document.getElementById('beep');
 // ---------- Countdown (5:00) ----------
 let totalSeconds = 5 * 60;
 let countdownInt = null;
+
 function startCountdown(){
   stopCountdown();
   countdownInt = setInterval(()=>{
@@ -73,24 +73,38 @@ function startCountdown(){
     const m = Math.max(0, Math.floor(totalSeconds/60)).toString().padStart(2,'0');
     const s = Math.max(0, totalSeconds%60).toString().padStart(2,'0');
     timerEl.textContent = `${m}:${s}`;
-    if (totalSeconds === 30) surpriseCue(); // sorpresa en 4:30 → quedan 30s
-    if (totalSeconds <= 0){ clearInterval(countdownInt); try{beep.play()}catch(e){} }
+
+    if (totalSeconds === 30) surpriseCue();
+    if (totalSeconds <= 0){
+      clearInterval(countdownInt);
+      try{ beep.play(); }catch(e){}
+    }
   },1000);
 }
-function stopCountdown(){ if (countdownInt) clearInterval(countdownInt); }
-function resetCountdown(){ totalSeconds = 300; timerEl.textContent='05:00'; }
+
+function stopCountdown(){
+  if (countdownInt) clearInterval(countdownInt);
+}
+
+function resetCountdown(){
+  totalSeconds = 300;
+  timerEl.textContent='05:00';
+}
 
 // ---------- Speech-to-text ----------
 let recognizing = false;
 let recognition;
 let liveText = '';
+
 function initSTT(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
+
   const r = new SR();
   r.lang = 'es-ES';
   r.continuous = true;
   r.interimResults = true;
+
   r.onresult = (e)=>{
     let finalChunk='';
     for (let i=e.resultIndex;i<e.results.length;i++){
@@ -100,17 +114,30 @@ function initSTT(){
     }
     if (finalChunk) liveText = finalChunk;
     promptBox.textContent = liveText || 'Prompt en vivo…';
-    promptBox.classList.add('flash'); setTimeout(()=>promptBox.classList.remove('flash'),150);
+    promptBox.classList.add('flash');
+    setTimeout(()=>promptBox.classList.remove('flash'),150);
   };
+
   r.onend = ()=>{ if (recognizing) r.start(); };
   return r;
 }
+
 recognition = initSTT();
 
 micBtn.onclick = ()=>{
-  if (!recognition){ alert('SpeechRecognition no disponible en este navegador.'); return; }
-  if (!recognizing){ recognition.start(); recognizing = true; micBtn.textContent='🛑 Stop mic'; }
-  else { recognizing=false; recognition.stop(); micBtn.textContent='🎙️ Start mic'; }
+  if (!recognition){
+    alert('SpeechRecognition no disponible en este navegador.');
+    return;
+  }
+  if (!recognizing){
+    recognition.start();
+    recognizing = true;
+    micBtn.textContent='🛑 Stop mic';
+  } else {
+    recognizing=false;
+    recognition.stop();
+    micBtn.textContent='🎙️ Start mic';
+  }
 };
 
 // ---------- Image generation ----------
@@ -136,41 +163,66 @@ function crossfadeTo(url){
 
 // ---------- Cadence loop ----------
 let cadenceInt = null;
+
 function startCadence(){
   stopCadence();
   const ms = Number(cadenceSel.value) * 1000;
- cadenceInt = setInterval(async ()=>{
+
+  cadenceInt = setInterval(async ()=>{
+    const prompt =
+      `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. ` +
+      `Incorporar un 50% de estas palabras: "${liveText || ""}". ` +
+      `No representar nada literal.`;
+
+    try {
+      const url = await generateImage(prompt);
+      crossfadeTo(url);
+    } catch(err) {
+      console.error(err);
+    }
   }, ms);
-
 }
-function stopCadence(){ if (cadenceInt) clearInterval(cadenceInt); }
 
+function stopCadence(){
+  if (cadenceInt) clearInterval(cadenceInt);
+}
+
+// ---------- Generate Now ----------
 genNowBtn.onclick = async ()=>{
-  const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'imagen abstracta sobre atención, humano y algoritmo en escena';
- const prompt =
-  `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. ` +
-  `Incorporar un 50% de estas palabras: "${liveText || ""}". ` +
-  `No representar nada literal.`;
+  const prompt =
+    `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. ` +
+    `Incorporar un 50% de estas palabras: "${liveText || ""}". ` +
+    `No representar nada literal.`;
 
-try {
-  const url = await generateImage(prompt);
-  crossfadeTo(url);
-} catch(err) {
-  console.error(err);
-}
+  try {
+    const url = await generateImage(prompt);
+    crossfadeTo(url);
+  } catch(err) {
+    console.error(err);
+  }
 };
+
 cadenceSel.onchange = ()=> startCadence();
 resetBtn.onclick = ()=>{ stopCadence(); resetCountdown(); startCountdown(); };
 fsBtn.onclick = ()=> document.documentElement.requestFullscreen?.();
 
 // ---------- Sorpresa en 4:30 ----------
 let surpriseDone = false;
+
 async function surpriseCue(){
   if (surpriseDone) return;
   surpriseDone = true;
-  const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'atención, humano, algoritmo';
-  const prompt = `SORPRESA FINAL (estilo invertido): blanco sobre negro, siluetas minimalistas, alto contraste, composición asimétrica, sin texto. Inspirado en: ${base}.`;
-  try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ console.error(e); }
+
+  const prompt =
+    `SORPRESA FINAL (estilo invertido): blanco sobre negro, siluetas minimalistas, ` +
+    `alto contraste, composición asimétrica, sin texto. Inspirado en: "${liveText || ""}".`;
+
+  try{
+    const url = await generateImage(prompt);
+    crossfadeTo(url);
+  }catch(e){
+    console.error(e);
+  }
 }
 
 // ---------- Start show ----------
