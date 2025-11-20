@@ -139,18 +139,27 @@ let cadenceInt = null;
 function startCadence(){
   stopCadence();
   const ms = Number(cadenceSel.value) * 1000;
-  cadenceInt = setInterval(async ()=>{
-    const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'imagen abstracta sobre atención, humano y algoritmo en escena';
-    const prompt = `Genera una imagen escénica, poética, sin texto, inspirada en: ${base}. Sin logos. Fondo oscuro, alto contraste.`;
-    try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ console.error(e); }
+ cadenceInt = setInterval(async ()=>{
+  ...
+  };
   }, ms);
+
 }
 function stopCadence(){ if (cadenceInt) clearInterval(cadenceInt); }
 
 genNowBtn.onclick = async ()=>{
   const base = (liveText && liveText.trim().length>6) ? liveText.trim() : 'imagen abstracta sobre atención, humano y algoritmo en escena';
-  const prompt = `Genera una imagen escénica, poética, sin texto, inspirada en: ${base}. Sin logos. Fondo oscuro, alto contraste.`;
-  try { const url = await generateImage(prompt); crossfadeTo(url); } catch(e){ alert('Error generando imagen'); }
+ const prompt =
+  `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. ` +
+  `Incorporar un 50% de estas palabras: "${liveText || ""}". ` +
+  `No representar nada literal.`;
+
+try {
+  const url = await generateImage(prompt);
+  crossfadeTo(url);
+} catch(err) {
+  console.error(err);
+}
 };
 cadenceSel.onchange = ()=> startCadence();
 resetBtn.onclick = ()=>{ stopCadence(); resetCountdown(); startCountdown(); };
