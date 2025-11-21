@@ -19,7 +19,9 @@ export default async function handler(req, res) {
       }
     );
 
-    res.status(200).json({ url: output });
+    // FIX: Replicate returns an array with 1 URL
+    res.status(200).json({ url: output[0] });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Image generation failed" });
