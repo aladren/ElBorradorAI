@@ -1,75 +1,27 @@
+import Replicate from "replicate";
+
 export default async function handler(req, res) {
-  // CORS básico
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
-
-  // Fallback si algo falla
-  const fallback = () =>
-    res.status(200).json({ url: `https://picsum.photos/seed/${Date.now()}/1024` });
-
-  const key = process.env.STABILITY_API_KEY;
-  if (!key) return fallback();
-
-  // Leer prompt del body
-  let body = '';
-  await new Promise(r => {
-    req.on('data', c => (body += c));
-    req.on('end', r);
-  });
-
-  let prompt = '';
   try {
-    prompt = JSON.parse(body || '{}').prompt || '';
-  } catch (_) {}
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+    const { prompt } = req.body;
 
-  try {
-    const r = await fetch(
-      'https://api.stability.ai/v2beta/stable-image/generate/sdxl',
+    const replicate = new Replicate({
+      auth: process.env.REPLICATE_API_TOKEN,
+    });
+
+    const output = await replicate.run(
+      "stability-ai/sdxl:1f8ba7070e20c3ec915c6ad12b4b228c2e4e962f864e8b6d23830e65e8b6e8bd",
       {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          Accept: 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+        input: {
           prompt,
-          cfg_scale: 7.5,
-          aspect_ratio: '16:9',
-          output_format: 'png',
-          model: 'stable-diffusion-xl-1024-v1-0'
-        })
+          aspect_ratio: "16:9",
+          output_format: "png"
+        }
       }
     );
 
-    if (!r.ok) {
-      console.error('Stability error status:', r.status);
-      console.error('Stability error body:', await r.text());
-      return fallback();
-    }
-
-    const data = await r.json();
-    const b64 =
-      data.image ||
-      data.image_base64 ||
-      (data.artifacts && data.artifacts[0] && data.artifacts[0].base64);
-
-    if (!b64) {
-      console.error('No base64 image in response:', data);
-      return fallback();
-    }
-
-    const finalUrl = b64.startsWith('data:')
-      ? b64
-      : `data:image/png;base64,${b64}`;
-
-    return res.status(200).json({ url: finalUrl });
+    res.status(200).json({ url: output });
   } catch (err) {
-    console.error('Server error:', err);
-    return fallback();
+    console.error(err);
+    res.status(500).json({ error: "Image generation failed" });
   }
 }
