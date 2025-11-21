@@ -9,17 +9,15 @@ export default async function handler(req, res) {
     });
 
     const output = await replicate.run(
-      "stability-ai/sdxl:1f8ba7070e20c3ec915c6ad12b4b228c2e4e962f864e8b6d23830e65e8b6e8bd",
+      "black-forest-labs/flux-1-schnell",
       {
         input: {
           prompt,
-          aspect_ratio: "16:9",
-          output_format: "png"
+          aspect_ratio: "16:9"
         }
       }
     );
 
-    // FIX: Replicate returns an array with 1 URL
     res.status(200).json({ url: output[0] });
 
   } catch (err) {
