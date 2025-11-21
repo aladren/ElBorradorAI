@@ -5,38 +5,67 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>El Borrador — Proyección en vivo</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Arial,sans-serif}
+  html,body{
+    margin:0;height:100%;background:#000;color:#fff;
+    font-family:system-ui,Arial,sans-serif;overflow:hidden;
+  }
   .stage{position:relative;width:100%;height:100vh;overflow:hidden}
-  .img{position:absolute;inset:0;background-size:cover;background-position:center;background-repeat:no-repeat;opacity:0;transition:opacity 1.2s ease}
+  .img{
+    position:absolute;inset:0;
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    opacity:0;transition:opacity 1.2s ease;
+  }
   .img.visible{opacity:1}
-  .hud{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center}
-  .timer{margin-left:auto;font-size:28px;font-weight:700;letter-spacing:1px;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:8px}
-  .controls{display:flex;gap:8px}
-  button,select{background:#111;color:#fff;border:1px solid #444;padding:6px 10px;border-radius:8px;cursor:pointer}
+
+  .hud{
+    position:absolute;top:12px;left:12px;right:12px;
+    display:flex;gap:8px;align-items:center;z-index:30;
+  }
+  button,select{
+    background:#111;color:#fff;border:1px solid #444;
+    padding:6px 10px;border-radius:8px;cursor:pointer;
+  }
   button:hover{border-color:#888}
-  .prompt{position:absolute;bottom:12px;left:12px;right:12px;background:rgba(0,0,0,.45);padding:10px;border-radius:8px;font-size:14px;line-height:1.35}
+
+  .timer{
+    margin-left:auto;font-size:28px;font-weight:700;
+    background:rgba(0,0,0,.45);padding:6px 10px;border-radius:8px;
+  }
+
+  .prompt{
+    position:absolute;bottom:12px;left:12px;right:12px;
+    background:rgba(0,0,0,.45);padding:10px;border-radius:8px;
+    font-size:14px;line-height:1.35;z-index:20;
+  }
   .flash{animation:flash .6s ease 1}
-  @keyframes flash{from{background:#fff;color:#000}to{background:rgba(0,0,0,.45);color:#fff}}
+  @keyframes flash{
+    from{background:#fff;color:#000}
+    to{background:rgba(0,0,0,.45);color:#fff}
+  }
 </style>
 </head>
 <body>
-<div class="stage" id="stage">
+
+<div class="stage">
   <div class="img" id="imgA"></div>
   <div class="img" id="imgB"></div>
 
   <div class="hud">
-    <div class="controls">
-      <button id="micBtn">🎙️ Start/Stop mic</button>
-      <button id="genNow">Generate now</button>
-      <button id="stopGen">Stop</button>
-      <select id="cadence">
-        <option value="30">Every 30s</option>
-        <option value="20">Every 20s</option>
-        <option value="40">Every 40s</option>
-      </select>
-      <button id="reset">Reset 5:00</button>
-      <button id="fullscreen">Fullscreen</button>
-    </div>
+    <button id="micBtn">🎙️ Start/Stop mic</button>
+    <button id="genNow">Generate now</button>
+    <button id="stopBtn">Stop</button>
+
+    <select id="cadence">
+      <option value="30">Every 30s</option>
+      <option value="20">Every 20s</option>
+      <option value="40">Every 40s</option>
+    </select>
+
+    <button id="reset">Reset 5:00</button>
+    <button id="fullscreen">Fullscreen</button>
+
     <div class="timer" id="timer">05:00</div>
   </div>
 
@@ -50,46 +79,51 @@
 <script>
 const API_URL = '/api/generate-image';
 
-// ---------- DOM ----------
+// DOM
 const imgA = document.getElementById('imgA');
 const imgB = document.getElementById('imgB');
 let showingA = true;
+
 const timerEl = document.getElementById('timer');
 const promptBox = document.getElementById('promptBox');
 const micBtn = document.getElementById('micBtn');
 const genNowBtn = document.getElementById('genNow');
-const stopGenBtn = document.getElementById('stopGen');
+const stopBtn = document.getElementById('stopBtn');
 const cadenceSel = document.getElementById('cadence');
 const resetBtn = document.getElementById('reset');
 const fsBtn = document.getElementById('fullscreen');
-const beep = document.getElementById('beep');
 
-// ---------- Countdown ----------
-let totalSeconds = 5 * 60;
-let countdownInt = null;
+let buffer = "";  
+let liveText = "";
+
+// TIMER
+let totalSeconds = 300;
+let countdownInt=null;
 
 function startCountdown(){
   stopCountdown();
   countdownInt = setInterval(()=>{
     totalSeconds--;
-    const m = Math.max(0, Math.floor(totalSeconds/60)).toString().padStart(2,'0');
-    const s = Math.max(0, totalSeconds%60).toString().padStart(2,'0');
+    const m = String(Math.floor(totalSeconds/60)).padStart(2,'0');
+    const s = String(totalSeconds%60).padStart(2,'0');
     timerEl.textContent = `${m}:${s}`;
-    if (totalSeconds === 30) surpriseCue();
-    if (totalSeconds <= 0){ clearInterval(countdownInt); try{beep.play()}catch(e){} }
+    if(totalSeconds === 30) surpriseCue();
+    if(totalSeconds <= 0){
+      clearInterval(countdownInt);
+      document.getElementById('beep').play();
+    }
   },1000);
 }
-function stopCountdown(){ if (countdownInt) clearInterval(countdownInt); }
-function resetCountdown(){ totalSeconds = 300; timerEl.textContent='05:00'; }
+function stopCountdown(){ clearInterval(countdownInt); }
+function resetCountdown(){ totalSeconds = 300; timerEl.textContent="05:00"; }
 
-// ---------- Speech-to-text ----------
+// SPEECH-TO-TEXT
 let recognizing = false;
-let recognition;
-let liveText = '';
+let recognition=null;
 
 function initSTT(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
+  if(!SR) return null;
 
   const r = new SR();
   r.lang = 'es-ES';
@@ -97,43 +131,49 @@ function initSTT(){
   r.interimResults = true;
 
   r.onresult = (e)=>{
-    let finalChunk='';
-    for (let i=e.resultIndex;i<e.results.length;i++){
+    let finalChunk = "";
+    for(let i=e.resultIndex;i<e.results.length;i++){
       const tr = e.results[i][0].transcript;
-      if (e.results[i].isFinal) finalChunk += tr + ' ';
-      else liveText = (liveText + " " + tr).split(" ").slice(-40).join(" ");
+      if(e.results[i].isFinal){
+        finalChunk += tr+" ";
+        buffer += tr+" ";
+      } else {
+        liveText = tr;
+      }
     }
-    if (finalChunk) liveText = (liveText + " " + finalChunk).split(" ").slice(-40).join(" ");
+    if(finalChunk) liveText = finalChunk;
 
-    promptBox.textContent = liveText || 'Prompt en vivo…';
-    promptBox.classList.add('flash');
-    setTimeout(()=>promptBox.classList.remove('flash'),150);
+    promptBox.textContent = liveText || "Prompt en vivo…";
+    promptBox.classList.add("flash");
+    setTimeout(()=>promptBox.classList.remove("flash"),150);
   };
 
-  r.onend = ()=>{ if (recognizing) r.start(); };
+  r.onend = ()=>{ if(recognizing) r.start(); };
   return r;
 }
 
 recognition = initSTT();
 
 micBtn.onclick = ()=>{
-  if (!recognition){ alert('SpeechRecognition no disponible.'); return; }
-  if (!recognizing){
-    recognition.start(); recognizing = true; micBtn.textContent='🛑 Stop mic';
+  if(!recognition){ alert("No STT"); return; }
+  if(!recognizing){
+    recognition.start(); recognizing=true;
+    micBtn.textContent="🛑 Stop mic";
   } else {
-    recognizing=false; recognition.stop(); micBtn.textContent='🎙️ Start mic';
+    recognition.stop(); recognizing=false;
+    micBtn.textContent="🎙️ Start mic";
   }
 };
 
-// ---------- Image generation ----------
+// IMAGE GEN
 async function generateImage(prompt){
-  const res = await fetch(API_URL, {
-    method:'POST',
+  const res = await fetch(API_URL,{
+    method:"POST",
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ prompt })
+    body:JSON.stringify({prompt})
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Error generating image');
+  if(!res.ok) throw new Error(data.error);
   return data.url;
 }
 
@@ -141,70 +181,73 @@ function crossfadeTo(url){
   const next = showingA ? imgB : imgA;
   const prev = showingA ? imgA : imgB;
   next.style.backgroundImage = `url("${url}")`;
-  next.classList.add('visible');
-  prev.classList.remove('visible');
+  next.classList.add("visible");
+  prev.classList.remove("visible");
   showingA = !showingA;
 }
 
-// ---------- Cadence loop ----------
-let cadenceInt = null;
+// CADENCE
+let cadenceInt=null;
 
 function startCadence(){
   stopCadence();
-  const ms = Number(cadenceSel.value) * 1000;
+  const ms = Number(cadenceSel.value)*1000;
 
   cadenceInt = setInterval(async ()=>{
-    const prompt =
-      `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. ` +
-      `Incorporar un 50% de estas palabras: "${liveText}". No representar nada literal.`;
-
-    try {
+    const prompt = buildPrompt();
+    try{
       const url = await generateImage(prompt);
       crossfadeTo(url);
-    } catch(err) { console.error(err); }
-
+    }catch(e){ console.error(e); }
   }, ms);
 }
 
-function stopCadence(){ if (cadenceInt) clearInterval(cadenceInt); }
-
-stopGenBtn.onclick = ()=> stopCadence();
-
-// ---------- Generate Now ----------
-genNowBtn.onclick = async ()=>{
-  const prompt =
-    `Textura abstracta y teatral, sin figuras, sombras densas, movimiento sugerido. `+
-    `Incorporar un 50% de estas palabras: "${liveText}". No representar nada literal.`;
-
-  try {
-    const url = await generateImage(prompt);
-    crossfadeTo(url);
-  } catch(err) { console.error(err); }
-};
-
-cadenceSel.onchange = ()=> startCadence();
-resetBtn.onclick = ()=>{ stopCadence(); resetCountdown(); startCountdown(); };
-fsBtn.onclick = ()=> document.documentElement.requestFullscreen?.();
-
-// ---------- Sorpresa ----------
-let surpriseDone = false;
-
-async function surpriseCue(){
-  if (surpriseDone) return;
-  surpriseDone = true;
-
-  const prompt =
-    `SORPRESA FINAL: blanco sobre negro, siluetas minimalistas, ` +
-    `alto contraste, composición asimétrica. Inspirado en: "${liveText}".`;
-
-  try{
-    const url = await generateImage(prompt);
-    crossfadeTo(url);
-  }catch(e){ console.error(e); }
+function stopCadence(){
+  if(cadenceInt) clearInterval(cadenceInt);
 }
 
-// ---------- Start show ----------
-window.addEventListener('load', ()=>{
+// PROMPT BUILDER
+function buildPrompt(){
+  const text = buffer.trim() || liveText.trim() || "";
+  return `
+Imagen abstracta 16:9, teatral, sombras densas, sin literalidad.
+Inspirada en: ${text}.
+No figuras humanas. No texto. Movimiento sugerido.`;
+}
+
+// BUTTONS
+genNowBtn.onclick = async ()=>{
+  try{
+    const url = await generateImage(buildPrompt());
+    crossfadeTo(url);
+  }catch(e){ console.error(e); }
+};
+
+stopBtn.onclick = ()=> stopCadence();
+
+cadenceSel.onchange = ()=> startCadence();
+
+resetBtn.onclick = ()=>{
+  stopCadence();
+  resetCountdown();
+  startCountdown();
+  startCadence();
+};
+
+fsBtn.onclick = ()=> document.documentElement.requestFullscreen();
+
+// SURPRISE
+let surpriseDone=false;
+async function surpriseCue(){
+  if(surpriseDone) return;
+  surpriseDone=true;
+  try{
+    const url = await generateImage(`Blanco/negro, alto contraste, ruptura, inspirado en: ${buffer}`);
+    crossfadeTo(url);
+  }catch(e){console.error(e);}
+}
+
+window.addEventListener("load",()=>{
   resetCountdown();
   startCountdown();
   startCadence();
